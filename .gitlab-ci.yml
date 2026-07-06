@@ -1,0 +1,18 @@
+# Deploys the public maps app to Cloudflare Pages via Wrangler.
+# Required CI/CD variables (Settings > CI/CD > Variables, masked):
+#   CLOUDFLARE_API_TOKEN  - CF API token with Pages:Edit permission
+#   CLOUDFLARE_ACCOUNT_ID - your CF account ID
+
+stages:
+  - deploy
+
+deploy_maps:
+  stage: deploy
+  image: node:20-alpine
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - apps/maps/**/*
+  script:
+    - npm install -g wrangler
+    - wrangler pages deploy apps/maps/public --project-name=maps --branch=main

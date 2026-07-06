@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Business Listing</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/config.js"></script>
+</head>
+<body class="bg-gray-50 font-sans">
+<main class="max-w-md mx-auto p-4" id="app">
+  <p class="text-center text-4xl mt-20 animate-pulse">&#9203;</p>
+</main>
+
+<script>
+const sb = supabase.createClient(SKM_CONFIG.SUPABASE_URL, SKM_CONFIG.SUPABASE_ANON_KEY);
+
+// URL patterns: /digipin/XXXX  /pincode/110001  /l/<uuid>
+async function load() {
+  const parts = location.pathname.split('/').filter(Boolean);
+  const [kind, value] = [parts[0], decodeURIComponent(parts[1] || '')];
+  let query = sb.from('business_listings').select('*');
+  if (kind === 'digipin') query = query.eq('digipin', value.toUpperCase()).limit(1);
+  else if (kind === 'pincode') query = query.eq('pincode', value).limit(50);
+  else query = query.eq('id', value).limit(1);
+
+  const { data, error } = await query;
+  const app = document.getElementById('app');
+  if (error || !data?.length) { app.innerHTML = '<p class="text-center text-5xl mt-20">&#128533;</p>'; return; }
+
+  app.innerHTML = '';
+  for (const r of data) {
+    track(r.id, 'map_view');
+    document.title = r.name + ' | Maps';
+    const el = document.createElement('div');
+    el.className = 'bg-white p-5 rounded-2xl shadow-md border-t-8 mb-4 ' + (r.is_premium ? 'border-amber-400' : 'border-indigo-500');
+    el.innerHTML = `
+      <h1 class="text-xl font-bold">${esc(r.name)} ${r.is_verified ? '&#9989;' : ''}</h1>
+      <p class="text-sm text-gray-500 font-mono mt-1">${esc(r.digipin || '')} &bull; ${esc(r.pincode)}</p>
+      <div class="grid grid-cols-2 gap-3 mt-5">
+        <a href="https://wa.me/${esc(r.whatsapp_number || '')}" onclick="track('${r.id}','whatsapp_click')" class="bg-emerald-500 text-white p-4 rounded-xl text-center font-bold">&#128172; WhatsApp</a>
+        <button onclick="paywall()" class="bg-amber-500 text-white p-4 rounded-xl text-center font-bold">&#11088; Premium</button>
+      </div>
+      <div id="hubs-${r.id}" class="mt-4 text-sm text-gray-600"></div>`;
+    app.appendChild(el);
+    if (r.location?.coordinates) loadHubs(r.id, r.location.coordinates);
+  }
+}
+
+async function loadHubs(id, [lng, lat]) {
+  const { data } = await sb.rpc('nearest_hubs', { lat, lng, max_results: 3 });
+  if (!data?.length) return;
+  const icons = { rail: '&#128646;', highway: '&#128739;', bus: '&#128652;', airport: '&#9992;', transport_agency: '&#128667;' };
+  document.getElementById('hubs-' + id).innerHTML =
+    data.map(h => `<div class="flex justify-between py-1 border-b"><span>${icons[h.hub_type] || ''} ${esc(h.name)}</span><b>${h.distance_km} km</b></div>`).join('');
+}
+
+function paywall() {
+  // UPI deep link - replace VPA before launch
+  location.href = 'upi://pay?pa=REPLACE_VPA@bank&pn=Maps&am=99&cu=INR&tn=PremiumListing';
+}
+function track(shopId, action) { sb.from('lead_tracking').insert({ shop_id: shopId, action_type: action }).then(() => {}); }
+function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+load();
+</script>
+</body>
+</html>
