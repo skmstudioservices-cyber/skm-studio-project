@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Regional Manager</title>
+<meta name="robots" content="noindex,nofollow">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/config.js"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+
+<div id="loginView" class="max-w-md mx-auto p-6 mt-16 hidden">
+  <div class="bg-white p-6 rounded-2xl shadow text-center">
+    <div class="text-4xl mb-3">&#128188;</div>
+    <input id="email" type="email" placeholder="Manager email" class="w-full px-4 py-3 border rounded-xl text-center mb-3">
+    <button onclick="login()" class="w-full bg-gray-900 text-white p-3 rounded-xl font-bold">Send Magic Link</button>
+    <p id="loginMsg" class="mt-3"></p>
+  </div>
+</div>
+
+<div id="mgrView" class="max-w-2xl mx-auto p-4 hidden">
+  <header class="flex justify-between items-center mb-4">
+    <h1 class="font-bold text-xl">&#128188; My Regions: <span id="regions" class="font-mono text-sm"></span></h1>
+    <button onclick="logout()" class="text-sm underline">Logout</button>
+  </header>
+  <div id="list" class="space-y-3"></div>
+</div>
+
+<script>
+const sb = supabase.createClient(SKM_CONFIG.SUPABASE_URL, SKM_CONFIG.SUPABASE_ANON_KEY);
+let myRegions = [];
+
+async function init() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { document.getElementById('loginView').classList.remove('hidden'); return; }
+  const { data: p } = await sb.from('user_profiles').select('assigned_role, assigned_region').eq('id', session.user.id).single();
+  if (p?.assigned_role !== 'manager' && p?.assigned_role !== 'super_admin') {
+    document.body.innerHTML = '<p class="text-center text-5xl mt-24">&#9940;</p>'; return;
+  }
+  myRegions = p.assigned_region || [];
+  document.getElementById('regions').textContent = myRegions.join(', ') || 'all';
+  document.getElementById('mgrView').classList.remove('hidden');
+  load();
+}
+
+async function login() {
+  const email = document.getElementById('email').value.trim();
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin } });
+  document.getElementById('loginMsg').textContent = error ? error.message : 'Check your email \u2709\uFE0F';
+}
+async function logout() { await sb.auth.signOut(); location.reload(); }
+
+async function load() {
+  let q = sb.from('business_listings').select('*').order('created_at', { ascending: false }).limit(200);
+  if (myRegions.length) q = q.in('pincode', myRegions);
+  const { data } = await q;
+  const el = document.getElementById('list');
+  el.innerHTML = '';
+  (data || []).forEach(r => {
+    const d = document.createElement('div');
+    d.className = 'bg-white p-4 rounded-2xl shadow flex justify-between items-center';
+    d.innerHTML = `
+      <div><b>${esc(r.name)}</b><div class="text-xs text-gray-500 font-mono">${esc(r.pincode)} ${r.is_verified ? '\u2705' : ''} ${r.is_premium ? '\u2B50' : ''}</div></div>
+      <button onclick="verify('${r.id}',${r.is_verified})" class="px-3 py-2 rounded-xl ${r.is_verified ? 'bg-green-100' : 'bg-gray-100'} text-xl">&#9989;</button>`;
+    el.appendChild(d);
+  });
+}
+
+// RLS enforces region restriction server-side; this is just UI
+async function verify(id, cur) { await sb.from('business_listings').update({ is_verified: !cur }).eq('id', id); load(); }
+function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+init();
+</script>
+</body>
+</html>

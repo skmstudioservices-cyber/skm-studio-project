@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Super Admin</title>
+<meta name="robots" content="noindex,nofollow">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/config.js"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+<!-- NOTE: also protect this whole project with Cloudflare Zero Trust (email OTP). -->
+
+<div id="loginView" class="max-w-md mx-auto p-6 mt-16 hidden">
+  <div class="bg-white p-6 rounded-2xl shadow text-center">
+    <div class="text-4xl mb-3">&#128081;</div>
+    <input id="email" type="email" placeholder="Admin email" class="w-full px-4 py-3 border rounded-xl text-center mb-3">
+    <button onclick="login()" class="w-full bg-gray-900 text-white p-3 rounded-xl font-bold">Send Magic Link</button>
+    <p id="loginMsg" class="mt-3"></p>
+  </div>
+</div>
+
+<div id="adminView" class="max-w-3xl mx-auto p-4 hidden">
+  <header class="flex justify-between items-center mb-4">
+    <h1 class="font-bold text-xl">&#128081; Admin</h1>
+    <button onclick="logout()" class="text-sm underline">Logout</button>
+  </header>
+
+  <!-- New listing + link manager -->
+  <div class="bg-white p-5 rounded-2xl shadow mb-5">
+    <h2 class="font-bold mb-3">&#10133; New Listing</h2>
+    <div class="grid grid-cols-2 gap-2">
+      <input id="nName" placeholder="Name" class="border p-2 rounded-lg col-span-2">
+      <input id="nCategory" placeholder="Category" class="border p-2 rounded-lg">
+      <input id="nPincode" placeholder="Pincode" class="border p-2 rounded-lg">
+      <input id="nDigipin" placeholder="DigiPIN (optional)" class="border p-2 rounded-lg">
+      <input id="nWhatsapp" placeholder="WhatsApp (91XXXXXXXXXX)" class="border p-2 rounded-lg">
+      <input id="nSlug" placeholder="Vanity slug (optional)" class="border p-2 rounded-lg col-span-2">
+    </div>
+    <button onclick="createListing()" class="mt-3 bg-indigo-600 text-white px-5 py-2 rounded-xl font-bold">Create + Ping IndexNow</button>
+    <p id="createMsg" class="mt-2 text-sm"></p>
+  </div>
+
+  <div class="bg-white p-5 rounded-2xl shadow">
+    <div class="flex gap-2 mb-3">
+      <input id="filter" placeholder="Filter by pincode/name" class="border p-2 rounded-lg flex-1">
+      <button onclick="loadListings()" class="bg-gray-900 text-white px-4 rounded-lg">&#128269;</button>
+    </div>
+    <div id="list" class="divide-y"></div>
+  </div>
+</div>
+
+<script>
+const sb = supabase.createClient(SKM_CONFIG.SUPABASE_URL, SKM_CONFIG.SUPABASE_ANON_KEY);
+
+async function init() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { show('loginView'); return; }
+  const { data: p } = await sb.from('user_profiles').select('assigned_role').eq('id', session.user.id).single();
+  if (p?.assigned_role !== 'super_admin') { document.body.innerHTML = '<p class="text-center text-5xl mt-24">&#9940;</p>'; return; }
+  show('adminView'); loadListings();
+}
+function show(id) { document.getElementById(id).classList.remove('hidden'); }
+
+async function login() {
+  const email = document.getElementById('email').value.trim();
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin } });
+  document.getElementById('loginMsg').textContent = error ? error.message : 'Check your email \u2709\uFE0F';
+}
+async function logout() { await sb.auth.signOut(); location.reload(); }
+
+async function createListing() {
+  const v = id => document.getElementById(id).value.trim();
+  const row = { name: v('nName'), category: v('nCategory'), pincode: v('nPincode'),
+    digipin: v('nDigipin').toUpperCase() || null, whatsapp_number: v('nWhatsapp') || null, vanity_slug: v('nSlug') || null };
+  if (!row.name || !row.pincode) { document.getElementById('createMsg').textContent = 'Name + pincode required'; return; }
+  const { data, error } = await sb.from('business_listings').insert(row).select().single();
+  if (error) { document.getElementById('createMsg').textContent = error.message; return; }
+  document.getElementById('createMsg').textContent = 'Created \u2705';
+  pingIndexNow([`https://maps.pages.dev/l/${data.id}`, `https://maps.pages.dev/pincode/${data.pincode}`]);
+  loadListings();
+}
+
+// SEO: server-side ping via CF Pages Function on the maps project
+function pingIndexNow(urls) {
+  fetch('https://maps.pages.dev/api/indexnow', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ urls })
+  }).catch(() => {});
+}
+
+async function loadListings() {
+  const f = document.getElementById('filter').value.trim();
+  let q = sb.from('business_listings').select('*').order('created_at', { ascending: false }).limit(100);
+  if (/^\d{6}$/.test(f)) q = q.eq('pincode', f); else if (f) q = q.ilike('name', `%${f}%`);
+  const { data } = await q;
+  const el = document.getElementById('list');
+  el.innerHTML = '';
+  (data || []).forEach(r => {
+    const d = document.createElement('div');
+    d.className = 'py-3 flex justify-between items-center gap-2';
+    d.innerHTML = `
+      <div class="min-w-0">
+        <b>${esc(r.name)}</b> <span class="text-xs text-gray-500">${esc(r.pincode)} ${esc(r.vanity_slug ? '/' + r.vanity_slug : '')}</span>
+      </div>
+      <div class="flex gap-2 shrink-0">
+        <button onclick="toggle('${r.id}','is_verified',${r.is_verified})" class="px-2 py-1 rounded-lg text-sm ${r.is_verified ? 'bg-green-100' : 'bg-gray-100'}">&#9989;</button>
+        <button onclick="toggle('${r.id}','is_premium',${r.is_premium})" class="px-2 py-1 rounded-lg text-sm ${r.is_premium ? 'bg-amber-100' : 'bg-gray-100'}">&#11088;</button>
+      </div>`;
+    el.appendChild(d);
+  });
+}
+
+async function toggle(id, field, cur) {
+  await sb.from('business_listings').update({ [field]: !cur }).eq('id', id);
+  loadListings();
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+init();
+</script>
+</body>
+</html>
