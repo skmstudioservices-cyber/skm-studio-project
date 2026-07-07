@@ -1,4 +1,4 @@
-# Deploys the public maps app to Cloudflare Pages via Wrangler.
+# Deploys each app to its own Cloudflare Pages project via Wrangler.
 # Required CI/CD variables (Settings > CI/CD > Variables, masked):
 #   CLOUDFLARE_API_TOKEN  - CF API token with Pages:Edit permission
 #   CLOUDFLARE_ACCOUNT_ID - your CF account ID
@@ -6,13 +6,44 @@
 stages:
   - deploy
 
-deploy_maps:
+.deploy_template: &deploy
   stage: deploy
   image: node:20-alpine
+  before_script:
+    - npm install -g wrangler
+
+deploy_maps:
+  <<: *deploy
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-      changes:
-        - apps/maps/**/*
+      changes: ["apps/maps/**/*"]
   script:
-    - npm install -g wrangler
-    - wrangler pages deploy apps/maps/public --project-name=maps --branch=main
+    - cd apps/maps
+    - wrangler pages deploy public --project-name=maps --branch=main
+
+deploy_profiles:
+  <<: *deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes: ["apps/profiles/**/*"]
+  script:
+    - cd apps/profiles
+    - wrangler pages deploy public --project-name=profiles --branch=main
+
+deploy_dash:
+  <<: *deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes: ["apps/dash/**/*"]
+  script:
+    - cd apps/dash
+    - wrangler pages deploy public --project-name=dash --branch=main
+
+deploy_admins:
+  <<: *deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes: ["apps/admins/**/*"]
+  script:
+    - cd apps/admins
+    - wrangler pages deploy public --project-name=admins --branch=main
